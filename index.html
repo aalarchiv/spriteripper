@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sprite Ripper</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- Top toolbar: file open, filename, zoom slider -->
+  <header class="toolbar">
+    <button class="btn btn-primary" id="btnOpen">Open File</button>
+    <span class="file-info" id="fileInfo">No file loaded</span>
+    <div class="spacer"></div>
+    <div class="zoom-ctl">
+      Zoom
+      <input type="range" id="inZoom" min="1" max="16" value="2">
+      <span id="zoomVal">2&times;</span>
+    </div>
+  </header>
+
+  <div class="main">
+
+    <!-- Preview area: renders the binary as pixel columns -->
+    <div class="preview" id="preview">
+      <div class="sizer" id="sizer">
+        <canvas id="canvas" width="0" height="0"></canvas>
+
+        <!-- Selection rectangle with 8 resize handles -->
+        <div class="sel-rect" id="selRect">
+          <div class="sel-handle sel-nw"></div>
+          <div class="sel-handle sel-ne"></div>
+          <div class="sel-handle sel-sw"></div>
+          <div class="sel-handle sel-se"></div>
+          <div class="sel-handle sel-n"></div>
+          <div class="sel-handle sel-s"></div>
+          <div class="sel-handle sel-w"></div>
+          <div class="sel-handle sel-e"></div>
+        </div>
+      </div>
+
+      <!-- Drop zone message, hidden after file load -->
+      <div class="dropzone" id="dropzone">
+        <div>
+          <p>Drop a binary file here</p>
+          <p>or click <strong>Open File</strong></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Crosshair overlay lines (follow mouse, clipped to preview) -->
+    <div class="crosshair crosshair-h" id="crossH"></div>
+    <div class="crosshair crosshair-v" id="crossV"></div>
+
+    <!-- Magnifying lens (shown on LMB drag or RMB hold) -->
+    <div class="lens" id="lens">
+      <canvas id="lensCanvas"></canvas>
+    </div>
+
+    <!-- Sidebar: all controls and info -->
+    <aside class="sidebar">
+      <div class="sidebar-scroll">
+
+        <!-- Action buttons -->
+        <div class="btn-row">
+          <button class="btn" id="btnFocus">Focus</button>
+          <div class="save-group">
+            <button class="btn btn-green" id="btnSave">Save PNG</button>
+            <select id="saveFormat">
+              <option value="png">PNG</option>
+              <option value="ihex">IHEX</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Format settings: how pixel bits are stored -->
+        <section class="group">
+          <h3 class="group-title">Format</h3>
+          <div class="props">
+            <div class="prop">
+              <label title="Bits per pixel. Indexed color value: 1=2 colors, 2=4, 4=16, 8=256">BPP</label>
+              <input type="number" id="inBpp" min="1" max="8" value="1"
+                title="Bits per pixel (indexed color depth)">
+            </div>
+            <div class="prop">
+              <label title="How pixel bits are laid out in memory">Encoding</label>
+              <select id="inEncoding" title="Pixel bit layout in memory">
+                <option value="chunky"
+                  title="Each pixel's bits stored contiguously. GBA, Genesis, embedded LCDs, most modern formats.">
+                  Chunky (packed)</option>
+                <option value="planar_word"
+                  title="Bitplanes interleaved per word group. Each group has N words (one per plane) covering wordSize*8 pixels. Atari ST, SNES.">
+                  Planar (word)</option>
+                <option value="planar_line"
+                  title="Bitplanes interleaved per row. Each row stores plane0 bytes, then plane1, etc. Game Boy, some NES.">
+                  Planar (line)</option>
+              </select>
+            </div>
+            <div class="prop">
+              <label title="Data word size in bytes. Determines byte-swap unit for endianness, and pixel grouping for planar-word encoding.">
+                Word Size</label>
+              <select id="inWordSize" title="Word size for byte-swap and planar grouping">
+                <option value="8">8 bit</option>
+                <option value="16" selected>16 bit</option>
+                <option value="32">32 bit</option>
+              </select>
+            </div>
+            <div class="prop">
+              <label title="Byte order within multi-byte words. Big=high byte at lower address (Motorola 68k, MIPS). Little=low byte first (Intel x86, ARM).">
+                Byte Order</label>
+              <select id="inByteOrder" title="Storage order of bytes within words">
+                <option value="big">Big Endian</option>
+                <option value="little">Little Endian</option>
+              </select>
+            </div>
+            <label class="check-prop"
+              title="Which bit in a byte is the leftmost pixel. Most hardware is MSB-first. Some LCD controllers use LSB-first.">
+              <input type="checkbox" id="inMsbFirst" checked>
+              MSB first (bit order)
+            </label>
+          </div>
+        </section>
+
+        <!-- Frame settings: sprite dimensions and stride -->
+        <section class="group">
+          <h3 class="group-title">Frame</h3>
+          <div class="props">
+            <div class="prop">
+              <label title="Pixels per row. Also determines display line wrapping width.">Width (px)</label>
+              <input type="number" id="inWidth" min="1" max="4096" value="128">
+            </div>
+            <div class="prop">
+              <label title="Pixel rows per sprite frame.">Height (px)</label>
+              <input type="number" id="inHeight" min="1" max="4096" value="64">
+            </div>
+            <div class="prop">
+              <label title="Number of consecutive sprite frames to mark and export.">Count</label>
+              <input type="number" id="inCount" min="1" max="99999" value="1">
+            </div>
+            <div class="prop">
+              <label title="Bytes from one row's start to the next. 0=auto (tight packing from format). Override when rows have padding bytes at the end (e.g. framebuffer with stride > width).">
+                Row Stride (B)</label>
+              <input type="number" id="inRowStride" min="0" max="99999" value="0"
+                title="Bytes per row. 0=auto from width/bpp/encoding.">
+              <span class="hint">0 = auto from format</span>
+            </div>
+            <div class="prop">
+              <label title="Bytes from one frame's start to the next. 0=auto (row stride x height). Positive=absolute byte count. Negative=overlap from auto (e.g. -4 means frames share last 4 bytes).">
+                Frame Stride (B)</label>
+              <input type="number" id="inFrameStride" min="-99999" max="99999" value="0"
+                title="0=auto. Positive=absolute. Negative=auto minus N (overlap).">
+              <span class="hint">0=auto, -N=overlap N bytes</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Navigation: start address with step buttons -->
+        <section class="group">
+          <h3 class="group-title">Navigate</h3>
+          <div class="props">
+            <div class="prop" style="grid-template-columns: auto 1fr">
+              <label title="File byte offset where sprite data begins. Display aligns this address to column x=0.">
+                Start (hex)</label>
+              <div class="addr-row">
+                <button class="btn btn-sm" id="navPS"
+                  title="Back one frame (- frame stride)">&laquo;</button>
+                <button class="btn btn-sm" id="navPB"
+                  title="Back one byte">&lsaquo;</button>
+                <input type="text" id="inStartAddr" value="0"
+                  title="Start address in hex bytes">
+                <button class="btn btn-sm" id="navNB"
+                  title="Forward one byte">&rsaquo;</button>
+                <button class="btn btn-sm" id="navNS"
+                  title="Forward one frame (+ frame stride)">&raquo;</button>
+                <button class="btn btn-sm btn-green" id="btnAck"
+                  title="Apply selection: set start address, width, height from selection box">Ack</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Export: sprite name for filenames -->
+        <section class="group">
+          <h3 class="group-title">Export</h3>
+          <div class="props">
+            <div class="prop">
+              <label>Sprite Name</label>
+              <input type="text" id="inSpriteName" value="sprite">
+            </div>
+          </div>
+        </section>
+
+        <!-- Info: mouse address and selection details -->
+        <section class="group">
+          <h3 class="group-title">Info</h3>
+          <div class="info" id="info">&mdash;</div>
+        </section>
+
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- Hidden file input for the Open File button -->
+<input type="file" id="fileInput" hidden>
+
+<script src="app.js"></script>
+</body>
+</html>
